@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import StudentProfile, Classroom, Attendance, TeacherProfile
 from .serializers import StudentListSerializer
+from django.db.models import Count, Q
 
 # Create your views here.
 
@@ -34,3 +35,55 @@ def submit_attendance(request):
         )
 
     return Response({"message": "Attendance recorded successfully!"})
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_attendance(request):
+    # Ensure the logged-in user has a StudentProfile
+    try:
+        student_profile = request.user.student_profile
+    except AttributeError:
+        return Response({"error": "User is not a student"}, status=400)
+
+    # Get all attendance records for this student
+    attendance_records = Attendance.objects.filter(student=student_profile)
+    
+    total_days = attendance_records.count()
+    days_present = attendance_records.filter(is_present=True).count()
+    
+    # Calculate percentage safely
+    percentage = (days_present / total_days * 100) if total_days > 0 else 0
+
+    return Response({
+        "student_name": request.user.username,
+        "total_days": total_days,
+        "days_present": days_present,
+        "days_absent": total_days - days_present,
+        "percentage": round(percentage, 2)
+    })
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_students_with_attendance(request, class_id):
+    date_str = request.query_params.get('date') # Get date from URL like ?date=2026-02-04
+    if not date_str or date_str == "undefined":
+        date_str = date.today().isoformat()
+    students = StudentProfile.objects.filter(classroom_id=class_id)
+    
+    # Get attendance records for this class on this date
+    attendance_records = Attendance.objects.filter(classroom_id=class_id, date=date_str)
+    # Create a mapping of student_id -> is_present
+    attendance_map = {att.student_id: att.is_present for att in attendance_records}
+
+    student_data = []
+    for student in students:
+        student_data.append({
+            "id": student.id,
+            "roll_number": student.roll_number,
+            "username": student.user.username,
+            "admission_number": student.admission_number,
+            "email": student.user.email,
+            "is_present": attendance_map.get(student.id, True) # Default to True if not marked
+        })
+
+    return Response(student_data)

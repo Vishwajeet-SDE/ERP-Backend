@@ -4,6 +4,7 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from .models import StudentProfile, Classroom, Attendance, TeacherProfile
 from .serializers import StudentListSerializer
+from django.db.models import Count, Q
 
 # Create your views here.
 
@@ -34,3 +35,29 @@ def submit_attendance(request):
         )
 
     return Response({"message": "Attendance recorded successfully!"})
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def get_my_attendance(request):
+    # Ensure the logged-in user has a StudentProfile
+    try:
+        student_profile = request.user.student_profile
+    except AttributeError:
+        return Response({"error": "User is not a student"}, status=400)
+
+    # Get all attendance records for this student
+    attendance_records = Attendance.objects.filter(student=student_profile)
+    
+    total_days = attendance_records.count()
+    days_present = attendance_records.filter(is_present=True).count()
+    
+    # Calculate percentage safely
+    percentage = (days_present / total_days * 100) if total_days > 0 else 0
+
+    return Response({
+        "student_name": request.user.username,
+        "total_days": total_days,
+        "days_present": days_present,
+        "days_absent": total_days - days_present,
+        "percentage": round(percentage, 2)
+    })
